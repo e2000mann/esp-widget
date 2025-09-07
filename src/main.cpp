@@ -3,6 +3,8 @@
 #include <M5CoreS3.h>
 #include <SPI.h>
 #include <SD.h>
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
 
 // custom libraries
 
@@ -11,6 +13,20 @@
 #define SD_SPI_MISO_PIN 35
 #define SD_SPI_MOSI_PIN 37
 #define SD_SPI_CS_PIN   4
+
+// secrets
+#ifndef AP_SSID
+  #error "AP_SSID not defined"
+#endif
+#ifndef AP_PASS
+  #error "AP_PASS not defined"
+#endif
+
+// web server variables
+AsyncWebServer server(80);
+IPAddress apIP(10, 0, 0, 1);
+IPAddress gw  (10, 0, 0, 1);
+IPAddress mask(255, 255, 255, 0);
 
 // function declarations
 void displayPngImage(const char *filename);
@@ -45,6 +61,16 @@ void setup() {
     M5.Display.print("\n SD card detected\n");
   }
   delay(1000);
+
+  // Initialise WiFi Connection
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(apIP, gw, mask);
+  bool apOK = WiFi.softAP(AP_SSID, AP_PASS);
+  Serial.println(WiFi.softAPIP());
+
+  // Initialise web server
+  server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
+  server.begin();
 
   // show initial picture
   displayPngImage("/mood_matrix/pleased.png");

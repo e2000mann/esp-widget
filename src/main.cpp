@@ -5,6 +5,8 @@
 #include <SD.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <AsyncJson.h>
+#include <ArduinoJson.h>
 
 // custom libraries
 
@@ -29,7 +31,13 @@ IPAddress gw  (10, 0, 0, 1);
 IPAddress mask(255, 255, 255, 0);
 
 // function declarations
-void displayPngImage(const char *filename);
+bool displayPngImage(const char *filename);
+void changeMoodMatrix(const String& chosenFace);
+
+// global variables
+volatile bool g_drawPending = true;
+String g_nextPath = "/mood_matrix/pleased.png"; // initial face
+volatile bool g_busyDrawing = false;
 
 void setup() {
   // Initialise serial connection
@@ -69,26 +77,51 @@ void setup() {
   Serial.println(WiFi.softAPIP());
 
   // Initialise web server
-  server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
-  server.begin();
+  auto *json = new AsyncCallbackJsonWebHandler(
+    "/mood-matrix",
+    [](AsyncWebServerRequest* request, JsonVariant &json) {
+      // Body is already parsed here
+      String chosenFace = json["chosenFace"] | "";
+      if (chosenFace.isEmpty()) {
+        request->send(400, "application/json", R"({"error":"Incorrect JSON. Expecting {chosenFace: 'faceName'}"})");
+        return;
+      }
 
-  // show initial picture
-  displayPngImage("/mood_matrix/pleased.png");
+      changeMoodMatrix(chosenFace);
+
+      request->send(200, "application/json", R"({"ok":true})");
+    }
+  );
+  json->setMaxContentLength(256);
+  server.addHandler(json);
+
+  server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
+
+  server.begin();
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+  if (g_drawPending && !g_busyDrawing) {
+    g_drawPending = false;
+    g_busyDrawing = true;
+
+    bool ok = displayPngImage(g_nextPath.c_str());
+
+    g_busyDrawing = false;
+
+    yield();
+  }
 }
 
 // functions
-void displayPngImage(const char *filename) {
+bool displayPngImage(const char *filename) {
   Serial.println("Drawing PNG...");
   Serial.println(filename);
 
   fs::File imgFile = SD.open(filename, FILE_READ);
   if (!imgFile) {
     Serial.println("Failed to open PNG!");
-    return;
+    return false;
   }
 
   bool displaySet = CoreS3.Display.drawPng(&imgFile, 0, 0);
@@ -96,4 +129,12 @@ void displayPngImage(const char *filename) {
   imgFile.close();
   
   Serial.println(displaySet ? "PNG Loaded" : "Failed to load PNG");
+  return displaySet;
+}
+
+void changeMoodMatrix(const String& chosenFace) {
+  String path = "/mood_matrix/" + chosenFace + ".png";
+
+  g_nextPath = path;
+  g_drawPending = true;
 }

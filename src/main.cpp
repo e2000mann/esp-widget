@@ -40,6 +40,10 @@ bool displayPngImage();
 void changeMoodMatrix(const String& chosenFace);
 void changeTTS(const String& text);
 bool speakOutLoud();
+void initDisplay();
+void initTTS();
+void initSDCard();
+void initWiFiAndWebServer();
 
 MemoryBufferStream memoryStream;
 ESpeak espeak(memoryStream);
@@ -55,17 +59,7 @@ volatile bool g_busySpeaking = false;
 
 static constexpr size_t kPcmCapacitySamples = AUDIO_SAMPLE_RATE * 60; // 60 sec max length for audio
 
-void setup() {
-  // Initialise serial connection
-  Serial.begin(115200);
-  delay(200);
-  Serial.println("Alive");
-
-  // Initialise CoreS3
-  auto cfg = M5.config();
-  CoreS3.begin(cfg);
-
-  // Initialise display
+void initDisplay() {
   CoreS3.Display.setSwapBytes(true);
   int textsize = CoreS3.Display.height() / 60;
   if (textsize == 0) {
@@ -74,7 +68,9 @@ void setup() {
   CoreS3.Display.setTextSize(textsize);
   CoreS3.Display.setRotation(1);
   CoreS3.Display.setBrightness(255);
+}
 
+void initTTS() {
   if (!memoryStream.begin(kPcmCapacitySamples)) {
     CoreS3.Display.print("\nPSRAM alloc failed for memoryStream\n");
     while (1)
@@ -92,8 +88,9 @@ void setup() {
 
   espeak.setVoice("en+f4");
   espeak.setRate(140);
-  
-  // Initialise SD card
+}
+
+void initSDCard() {
   SPI.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
   if (!SD.begin(SD_SPI_CS_PIN, SPI, 25000000)) {
     // Print a message if SD card initialization failed or if the SD card does not exist.
@@ -104,7 +101,9 @@ void setup() {
     CoreS3.Display.print("\n SD card detected\n");
   }
   delay(1000);
+}
 
+void initWiFiAndWebServer() {
   // Initialise WiFi Connection
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(apIP, gw, mask);
@@ -155,6 +154,22 @@ void setup() {
   server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
 
   server.begin();
+}
+
+void setup() {
+  // Initialise serial connection
+  Serial.begin(115200);
+  delay(200);
+  Serial.println("Alive");
+
+  // Initialise CoreS3
+  auto cfg = M5.config();
+  CoreS3.begin(cfg);
+
+  initDisplay();
+  initTTS();
+  initSDCard();
+  initWiFiAndWebServer();
 }
 
 void loop() {

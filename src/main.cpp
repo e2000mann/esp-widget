@@ -41,6 +41,7 @@ void changeMoodMatrix(const String& chosenFace);
 void changeTTS(const String& text);
 bool speakOutLoud();
 void initDisplay();
+void initSpeaker();
 void initTTS();
 void initSDCard();
 void initWiFiAndWebServer();
@@ -68,6 +69,10 @@ void initDisplay() {
   CoreS3.Display.setTextSize(textsize);
   CoreS3.Display.setRotation(1);
   CoreS3.Display.setBrightness(255);
+}
+
+void initSpeaker() {
+  CoreS3.Speaker.begin();
 }
 
 void initTTS() {
@@ -167,6 +172,7 @@ void setup() {
   CoreS3.begin(cfg);
 
   initDisplay();
+  initSpeaker();
   initTTS();
   initSDCard();
   initWiFiAndWebServer();

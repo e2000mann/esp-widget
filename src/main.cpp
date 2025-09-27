@@ -50,7 +50,7 @@ ESpeak espeak(memoryStream);
 
 // global variables
 volatile bool g_drawPending = true;
-String g_nextPath = "/mood_matrix/pleased.png"; // initial face
+String g_nextPath = "/mood_matrix/default.png"; // initial face
 volatile bool g_busyDrawing = false;
 
 volatile bool g_speakPending = true;

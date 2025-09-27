@@ -39,6 +39,7 @@ IPAddress mask(255, 255, 255, 0);
 bool displayPngImage();
 void changeMoodMatrix(const String& chosenFace);
 void changeTTS(const String& text);
+void changeSettings(const String& brightness, const String& volume);
 bool speakOutLoud();
 void initDisplay();
 void initSpeaker();
@@ -58,6 +59,9 @@ volatile bool g_speakPending = true;
 String g_ttsSentence = "This is a test";
 volatile bool g_busySpeaking = false;
 
+volatile int g_currentBrightness = 255;
+volatile int g_currentVolume = 128;
+
 static constexpr size_t kPcmCapacitySamples = AUDIO_SAMPLE_RATE * 60; // 60 sec max length for audio
 
 void initDisplay() {
@@ -68,11 +72,12 @@ void initDisplay() {
   }
   CoreS3.Display.setTextSize(textsize);
   CoreS3.Display.setRotation(1);
-  CoreS3.Display.setBrightness(255);
+  CoreS3.Display.setBrightness(g_currentBrightness);
 }
 
 void initSpeaker() {
   CoreS3.Speaker.begin();
+  CoreS3.Speaker.setVolume(g_currentVolume);
 }
 
 void initTTS() {
@@ -156,6 +161,31 @@ void initWiFiAndWebServer() {
   ttsHandler->setMaxContentLength(256);
   server.addHandler(ttsHandler);
 
+  auto *settingsHandler = new AsyncCallbackJsonWebHandler(
+    "/settings",
+    [](AsyncWebServerRequest* request, JsonVariant &json) {
+      // Body is already parsed here
+      String brightness = json["brightness"] | "";
+      String volume = json["volume"] | "";
+    
+      bool validBrightness = !brightness.isEmpty() && brightness.length() > 0;
+      bool validVolume = !volume.isEmpty() && volume.length() > 0;
+
+      if (!validBrightness || !validVolume) {
+        request->send(400, "application/json", R"({"error":"Incorrect JSON. Expecting {text: 'text goes here'}"})");
+        return;
+      }
+
+      Serial.println("settings req recieved");
+
+      changeSettings(brightness, volume);
+
+      request->send(200, "application/json", R"({"ok":true})");
+    }
+  );
+  settingsHandler->setMaxContentLength(256);
+  server.addHandler(settingsHandler);
+
   server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
 
   server.begin();
@@ -233,6 +263,21 @@ void changeMoodMatrix(const String& chosenFace) {
 void changeTTS(const String& text) {
   g_ttsSentence = text;
   g_speakPending = true;
+}
+
+void changeSettings(const String& brightness, const String& volume) {
+  int brightnessNum = brightness.toInt();
+  int volumeNum = volume.toInt();
+
+  if (brightnessNum != g_currentBrightness) {
+    g_currentBrightness = brightnessNum;
+    CoreS3.Display.setBrightness(g_currentBrightness);
+  }
+
+  if (volumeNum != g_currentVolume) {
+    g_currentVolume = volumeNum;
+    CoreS3.Speaker.setVolume(g_currentVolume);
+  }
 }
 
 bool speakOutLoud() {

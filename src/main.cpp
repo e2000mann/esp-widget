@@ -36,11 +36,15 @@ IPAddress gw  (10, 0, 0, 1);
 IPAddress mask(255, 255, 255, 0);
 
 // function declarations
-bool displayPngImage();
+bool displayMoodMatrix();
+bool displaySound();
+bool displayPngImage(const char* filename);
 void changeMoodMatrix(const String& chosenFace);
 void changeTTS(const String& text);
 void changeSettings(const String& brightness, const String& volume);
 bool speakOutLoud();
+bool playSound();
+void callOutSound(const String& sound);
 void initDisplay();
 void initSpeaker();
 void initTTS();
@@ -61,6 +65,10 @@ volatile bool g_busySpeaking = false;
 
 volatile int g_currentBrightness = 255;
 volatile int g_currentVolume = 128;
+
+volatile bool g_soundPending = false;
+String g_soundName = "";
+volatile bool g_busyWithSound = false;
 
 static constexpr size_t kPcmCapacitySamples = AUDIO_SAMPLE_RATE * 60; // 60 sec max length for audio
 
@@ -186,6 +194,26 @@ void initWiFiAndWebServer() {
   settingsHandler->setMaxContentLength(256);
   server.addHandler(settingsHandler);
 
+  auto *soundsHandler = new AsyncCallbackJsonWebHandler(
+    "/sound",
+    [](AsyncWebServerRequest* request, JsonVariant &json) {
+      // Body is already parsed here
+      String sound = json["sound"] | "";
+      if (sound.isEmpty()) {
+        request->send(400, "application/json", R"({"error":"Incorrect JSON. Expecting {sound: 'sound'}"})");
+        return;
+      }
+
+      Serial.println("sound req recieved");
+
+      callOutSound(sound);
+
+      request->send(200, "application/json", R"({"ok":true})");
+    }
+  );
+  soundsHandler->setMaxContentLength(256);
+  server.addHandler(soundsHandler);
+
   server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
 
   server.begin();
@@ -213,7 +241,7 @@ void loop() {
     g_drawPending = false;
     g_busyDrawing = true;
 
-    bool ok = displayPngImage();
+    bool ok = displayMoodMatrix();
 
     g_busyDrawing = false;
 
@@ -230,12 +258,38 @@ void loop() {
 
     yield();
   }
+
+  if (g_soundPending && !g_busyWithSound) {
+    g_soundPending = false;
+    g_busyWithSound = true;
+
+    bool displayOk = displaySound();
+    bool audioOK = playSound();
+
+    delay(1000);
+
+    g_busyWithSound = false;
+    g_drawPending = true; // revert to mood matrix image
+  }
 }
 
 // functions
-bool displayPngImage() {
+bool displayMoodMatrix() {
   const char* filename = g_nextPath.c_str();
+  
+  bool displaySet = displayPngImage(filename);
+  return displaySet;
+}
 
+bool displaySound() {
+  String combinedFileName = "/sounds/" + g_soundName + ".png";
+  const char* filename = combinedFileName.c_str();
+
+  bool displaySet = displayPngImage(filename);
+  return displaySet;
+}
+
+bool displayPngImage(const char* filename) {
   Serial.println("Drawing PNG...");
   Serial.println(filename);
 
@@ -313,3 +367,36 @@ bool speakOutLoud() {
 
   return audioOutput;
 };
+
+bool playSound() {
+  String combinedFileName = "/sounds/" + g_soundName + ".wav";
+  const char* filename = combinedFileName.c_str();
+
+  fs::File soundFile = SD.open(filename, FILE_READ);
+  if (!soundFile) {
+    Serial.println("Failed to open WAV!");
+    return false;
+  }
+
+  size_t fileSize = soundFile.size();
+  uint8_t* wavData = (uint8_t*)malloc(fileSize);
+
+  size_t bytesRead = soundFile.read(wavData, fileSize);
+  soundFile.close();
+
+  if (bytesRead != fileSize) {
+      Serial.printf("Read error: %d/%d bytes\n", bytesRead, fileSize);
+      free(wavData);
+      return false;
+  }
+
+  bool audioOutput = CoreS3.Speaker.playWav(wavData, fileSize);
+  
+  free(wavData);
+  return audioOutput;
+}
+
+void callOutSound(const String& sound) {
+  g_soundName = sound;
+  g_soundPending = true;
+}

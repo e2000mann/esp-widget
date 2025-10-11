@@ -5,8 +5,6 @@
 #include <SD.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
-#include <AsyncJson.h>
-#include <ArduinoJson.h>
 #include <espeak.h>
 #include <espeak-ng-data.h>
 
@@ -36,12 +34,16 @@ IPAddress gw  (10, 0, 0, 1);
 IPAddress mask(255, 255, 255, 0);
 
 // function declarations
+void handlePlainTextPost(AsyncWebServerRequest* request,
+                         uint8_t* data, size_t len, size_t index, size_t total,
+                         void (*callback)(const String&)) ;
+void addPlainTextEndpoint(const char* path, void (*callback)(const String&));
 bool displayMoodMatrix();
 bool displaySound();
 bool displayPngImage(const char* filename);
 void changeMoodMatrix(const String& chosenFace);
 void changeTTS(const String& text);
-void changeSettings(const String& brightness, const String& volume);
+void changeSettings(const String& settings);
 bool speakOutLoud();
 bool playSound();
 void callOutSound(const String& sound);
@@ -129,90 +131,10 @@ void initWiFiAndWebServer() {
   Serial.println(WiFi.softAPIP());
 
   // Initialise web server
-  auto *moodMatrixHandler = new AsyncCallbackJsonWebHandler(
-    "/mood-matrix",
-    [](AsyncWebServerRequest* request, JsonVariant &json) {
-      // Body is already parsed here
-      String chosenFace = json["chosenFace"] | "";
-      if (chosenFace.isEmpty()) {
-        request->send(400, "application/json", R"({"error":"Incorrect JSON. Expecting {chosenFace: 'faceName'}"})");
-        return;
-      }
-
-      Serial.println("mood matrix req recieved");
-
-      changeMoodMatrix(chosenFace);
-
-      request->send(200, "application/json", R"({"ok":true})");
-    }
-  );
-  moodMatrixHandler->setMaxContentLength(256);
-  server.addHandler(moodMatrixHandler);
-  
-  auto *ttsHandler = new AsyncCallbackJsonWebHandler(
-    "/tts",
-    [](AsyncWebServerRequest* request, JsonVariant &json) {
-      // Body is already parsed here
-      String text = json["text"] | "";
-      if (text.isEmpty()) {
-        request->send(400, "application/json", R"({"error":"Incorrect JSON. Expecting {text: 'text goes here'}"})");
-        return;
-      }
-
-      Serial.println("tts req recieved");
-
-      changeTTS(text);
-
-      request->send(200, "application/json", R"({"ok":true})");
-    }
-  );
-  ttsHandler->setMaxContentLength(256);
-  server.addHandler(ttsHandler);
-
-  auto *settingsHandler = new AsyncCallbackJsonWebHandler(
-    "/settings",
-    [](AsyncWebServerRequest* request, JsonVariant &json) {
-      // Body is already parsed here
-      String brightness = json["brightness"] | "";
-      String volume = json["volume"] | "";
-    
-      bool validBrightness = !brightness.isEmpty() && brightness.length() > 0;
-      bool validVolume = !volume.isEmpty() && volume.length() > 0;
-
-      if (!validBrightness || !validVolume) {
-        request->send(400, "application/json", R"({"error":"Incorrect JSON. Expecting {text: 'text goes here'}"})");
-        return;
-      }
-
-      Serial.println("settings req recieved");
-
-      changeSettings(brightness, volume);
-
-      request->send(200, "application/json", R"({"ok":true})");
-    }
-  );
-  settingsHandler->setMaxContentLength(256);
-  server.addHandler(settingsHandler);
-
-  auto *soundsHandler = new AsyncCallbackJsonWebHandler(
-    "/sound",
-    [](AsyncWebServerRequest* request, JsonVariant &json) {
-      // Body is already parsed here
-      String sound = json["sound"] | "";
-      if (sound.isEmpty()) {
-        request->send(400, "application/json", R"({"error":"Incorrect JSON. Expecting {sound: 'sound'}"})");
-        return;
-      }
-
-      Serial.println("sound req recieved");
-
-      callOutSound(sound);
-
-      request->send(200, "application/json", R"({"ok":true})");
-    }
-  );
-  soundsHandler->setMaxContentLength(256);
-  server.addHandler(soundsHandler);
+  addPlainTextEndpoint("/sound", callOutSound);
+  addPlainTextEndpoint("/mood-matrix", changeMoodMatrix);
+  addPlainTextEndpoint("/tts", changeTTS);
+  addPlainTextEndpoint("/settings", changeSettings);
 
   server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
 
@@ -274,6 +196,43 @@ void loop() {
 }
 
 // functions
+void handlePlainTextPost(AsyncWebServerRequest* request,
+                         uint8_t* data, size_t len, size_t index, size_t total,
+                         void (*callback)(const String&)) {
+  // Handle chunked requests (mostly for tts)
+  if (index == 0) request->_tempObject = new String();
+  String* body = static_cast<String*>(request->_tempObject);
+  body->concat(reinterpret_cast<const char*>(data), len);
+
+  // Final chunk?
+  if (index + len == total) {
+    body->trim();
+
+    if (body->isEmpty()) {
+      request->send(400, "application/json",
+                    R"({"error":"Empty body. Send plain text."})");
+    } else {
+      Serial.printf("[%s] received: %s\n", request->url().c_str(), body->c_str());
+      callback(*body);
+      request->send(200, "application/json", R"({"ok":true})");
+    }
+
+    delete body;
+    request->_tempObject = nullptr;
+  }
+}
+
+void addPlainTextEndpoint(const char* path, void (*callback)(const String&)) {
+  server.on(path, HTTP_POST,
+    [](AsyncWebServerRequest* request) {},
+    nullptr,
+    [callback](AsyncWebServerRequest* request,
+               uint8_t* data, size_t len, size_t index, size_t total) {
+      handlePlainTextPost(request, data, len, index, total, callback);
+    }
+  );
+}
+
 bool displayMoodMatrix() {
   const char* filename = g_nextPath.c_str();
   
@@ -319,9 +278,16 @@ void changeTTS(const String& text) {
   g_speakPending = true;
 }
 
-void changeSettings(const String& brightness, const String& volume) {
-  int brightnessNum = brightness.toInt();
-  int volumeNum = volume.toInt();
+void changeSettings(const String& settings) {
+  int commaIndex = settings.indexOf(',');
+  
+  if (commaIndex == -1) {
+    Serial.println("Invalid settings format");
+    return;
+  }
+
+  int brightnessNum = settings.substring(0, commaIndex).toInt();
+  int volumeNum = settings.substring(commaIndex + 1).toInt();
 
   if (brightnessNum != g_currentBrightness) {
     g_currentBrightness = brightnessNum;

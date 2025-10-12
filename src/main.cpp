@@ -61,8 +61,8 @@ volatile bool g_drawPending = true;
 String g_nextPath = "/mood_matrix/default.png"; // initial face
 volatile bool g_busyDrawing = false;
 
-volatile bool g_speakPending = true;
-String g_ttsSentence = "This is a test";
+volatile bool g_speakPending = false;
+String g_ttsSentence = "";
 volatile bool g_busySpeaking = false;
 
 volatile int g_currentBrightness = 255;

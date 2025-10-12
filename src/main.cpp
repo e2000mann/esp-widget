@@ -43,7 +43,8 @@ bool displaySound();
 bool displayPngImage(const char* filename);
 void changeMoodMatrix(const String& chosenFace);
 void changeTTS(const String& text);
-void changeSettings(const String& settings);
+void changeBrightness(const String& brightness);
+void changeVolume(const String& volume);
 bool speakOutLoud();
 bool playSound();
 void callOutSound(const String& sound);
@@ -134,7 +135,8 @@ void initWiFiAndWebServer() {
   addPlainTextEndpoint("/sound", callOutSound);
   addPlainTextEndpoint("/mood-matrix", changeMoodMatrix);
   addPlainTextEndpoint("/tts", changeTTS);
-  addPlainTextEndpoint("/settings", changeSettings);
+  addPlainTextEndpoint("/brightness", changeBrightness);
+  addPlainTextEndpoint("/volume", changeVolume);
 
   server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
 
@@ -278,21 +280,17 @@ void changeTTS(const String& text) {
   g_speakPending = true;
 }
 
-void changeSettings(const String& settings) {
-  int commaIndex = settings.indexOf(',');
-  
-  if (commaIndex == -1) {
-    Serial.println("Invalid settings format");
-    return;
-  }
-
-  int brightnessNum = settings.substring(0, commaIndex).toInt();
-  int volumeNum = settings.substring(commaIndex + 1).toInt();
+void changeBrightness(const String& brightness) {
+  int brightnessNum = brightness.toInt();
 
   if (brightnessNum != g_currentBrightness) {
     g_currentBrightness = brightnessNum;
     CoreS3.Display.setBrightness(g_currentBrightness);
   }
+}
+
+void changeVolume(const String& volume) {
+  int volumeNum = volume.toInt();
 
   if (volumeNum != g_currentVolume) {
     g_currentVolume = volumeNum;

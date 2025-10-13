@@ -33,14 +33,24 @@ IPAddress apIP(10, 0, 0, 1);
 IPAddress gw  (10, 0, 0, 1);
 IPAddress mask(255, 255, 255, 0);
 
+// image caching into psram
+struct CachedImage {
+  String path;
+  String data;
+  String mime;
+};
+std::vector<CachedImage> images;
+
 // function declarations
+void preloadImagesFromFolder(String folder);
+CachedImage* findCachedImage(String path);
 void handlePlainTextPost(AsyncWebServerRequest* request,
                          uint8_t* data, size_t len, size_t index, size_t total,
                          void (*callback)(const String&)) ;
 void addPlainTextEndpoint(const char* path, void (*callback)(const String&));
 bool displayMoodMatrix();
 bool displaySound();
-bool displayPngImage(const char* filename);
+bool displayPngImage(String filename);
 void changeMoodMatrix(const String& chosenFace);
 void changeTTS(const String& text);
 void changeBrightness(const String& brightness);
@@ -122,6 +132,11 @@ void initSDCard() {
     CoreS3.Display.print("\n SD card detected\n");
   }
   delay(1000);
+
+  preloadImagesFromFolder("/mood_matrix");
+  preloadImagesFromFolder("/sounds");
+  preloadImagesFromFolder("/www/assets/mm");
+  preloadImagesFromFolder("/www/assets/sounds");
 }
 
 void initWiFiAndWebServer() {
@@ -138,7 +153,24 @@ void initWiFiAndWebServer() {
   addPlainTextEndpoint("/brightness", changeBrightness);
   addPlainTextEndpoint("/volume", changeVolume);
 
-  server.serveStatic("/", SD, "/www/").setDefaultFile("index.html");
+  server.serveStatic("/", SD, "/www/")
+    .setDefaultFile("index.html")
+    .setFilter([](AsyncWebServerRequest *req) {
+      // reject /assets/ paths so cache/onNotFound can handle them
+      return !req->url().startsWith("/assets/");
+    });
+
+  server.onNotFound([](AsyncWebServerRequest *req) {
+    String url = "/www" + req->url();
+    CachedImage* img = findCachedImage(url);
+
+    if (img) {
+      req->send_P(200, img->mime, (uint8_t*)img->data.c_str(), img->data.length());
+      return;
+    }
+
+    req->send(404, "text/plain", "Not found");
+  });
 
   server.begin();
 }
@@ -198,6 +230,47 @@ void loop() {
 }
 
 // functions
+void preloadImagesFromFolder(String folder) {
+  File dir = SD.open(folder);
+  if (!dir || !dir.isDirectory()) {
+    Serial.printf("❌ %s is not a directory\n", folder);
+    return;
+  }
+
+  while (true) {
+    File file = dir.openNextFile();
+    if (!file) break;
+    if (file.isDirectory()) continue;
+
+    String name = file.name();
+    if (!name.endsWith(".webp") && !name.endsWith(".png")) {
+      continue;
+    }
+
+    size_t size = file.size();
+    CachedImage img;
+    img.mime = name.endsWith(".webp") ? "image/webp" :
+           name.endsWith(".png")  ? "image/png"  :
+           "application/octet-stream";
+    img.path = folder + "/" + name;
+    img.data.reserve(size);
+    while (file.available()) img.data += (char)file.read();
+    file.close();
+
+    Serial.printf("Cached %s (%u bytes)\n", img.path.c_str(), img.data.length());
+    images.push_back(std::move(img));
+  }
+  dir.close();
+}
+
+CachedImage* findCachedImage(String path) {
+  Serial.printf("Using cached image %s\n", path.c_str());
+  for (auto &img : images)
+    if (img.path.equals(path))
+      return &img;
+  return nullptr;
+}
+
 void handlePlainTextPost(AsyncWebServerRequest* request,
                          uint8_t* data, size_t len, size_t index, size_t total,
                          void (*callback)(const String&)) {
@@ -236,33 +309,29 @@ void addPlainTextEndpoint(const char* path, void (*callback)(const String&)) {
 }
 
 bool displayMoodMatrix() {
-  const char* filename = g_nextPath.c_str();
-  
-  bool displaySet = displayPngImage(filename);
+  bool displaySet = displayPngImage(g_nextPath);
   return displaySet;
 }
 
 bool displaySound() {
   String combinedFileName = "/sounds/" + g_soundName + ".png";
-  const char* filename = combinedFileName.c_str();
 
-  bool displaySet = displayPngImage(filename);
+  bool displaySet = displayPngImage(combinedFileName);
   return displaySet;
 }
 
-bool displayPngImage(const char* filename) {
+bool displayPngImage(String filename) {
   Serial.println("Drawing PNG...");
   Serial.println(filename);
 
-  fs::File imgFile = SD.open(filename, FILE_READ);
-  if (!imgFile) {
-    Serial.println("Failed to open PNG!");
+  CachedImage* img = findCachedImage(filename);
+
+  if (!img) {
+    Serial.println("Failed to load PNG (cache)");
     return false;
   }
 
-  bool displaySet = CoreS3.Display.drawPng(&imgFile, 0, 0);
-
-  imgFile.close();
+  bool displaySet = CoreS3.Display.drawPng((uint8_t*)img->data.c_str(), img->data.length(), 0, 0);
   
   Serial.println(displaySet ? "PNG Loaded" : "Failed to load PNG");
   return displaySet;

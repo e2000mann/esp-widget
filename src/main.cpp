@@ -92,6 +92,7 @@ void initDisplay() {
       textsize = 1;
   }
   CoreS3.Display.setTextSize(textsize);
+  CoreS3.Display.setTextScroll(true);
   CoreS3.Display.setRotation(1);
   CoreS3.Display.setBrightness(g_currentBrightness);
 }
@@ -246,6 +247,8 @@ void preloadImagesFromFolder(String folder) {
     if (!name.endsWith(".webp") && !name.endsWith(".png")) {
       continue;
     }
+
+    CoreS3.Display.printf("\n Caching file %s\n", name.c_str());
 
     size_t size = file.size();
     CachedImage img;

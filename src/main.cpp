@@ -76,7 +76,7 @@ volatile bool g_speakPending = false;
 String g_ttsSentence = "";
 volatile bool g_busySpeaking = false;
 
-volatile int g_currentBrightness = 255;
+volatile int g_currentBrightness = 100;
 volatile int g_currentVolume = 128;
 
 volatile bool g_soundPending = false;

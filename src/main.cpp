@@ -86,6 +86,9 @@ void initDisplay() {
   CoreS3.Display.setTextScroll(true);
   CoreS3.Display.setRotation(1);
   CoreS3.Display.setBrightness(g_currentBrightness);
+  
+  int batteryLevel = CoreS3.Power.getBatteryLevel();
+  CoreS3.Display.printf("\nCurrent battery level %d\n", batteryLevel);
 }
 
 void initSpeaker() {
